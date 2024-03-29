@@ -21,7 +21,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -124,6 +123,7 @@ import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.partition.spec.PartitionSpecProxy;
 import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.utils.ObjectPair;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.log4j.Logger;
 import org.apache.thrift.TException;
 
@@ -136,7 +136,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 
@@ -150,6 +149,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   // TODO "hook" into Hive logging (hive or hive.metastore)
   private static final Logger logger = Logger.getLogger(AWSCatalogMetastoreClient.class);
 
+  private final ExecutorService executorService;
   private final Configuration conf;
   private final AWSGlue glueClient;
   private final Warehouse wh;
@@ -158,17 +158,23 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   private final CatalogToHiveConverter catalogToHiveConverter;
   
   private static final int BATCH_DELETE_PARTITIONS_PAGE_SIZE = 25;
-  private static final int BATCH_DELETE_PARTITIONS_THREADS_COUNT = 5;
+
+  public static final String CUSTOM_EXECUTOR_FACTORY_CONF = "hive.metastore.executorservice.factory.class";
+
   static final String BATCH_DELETE_PARTITIONS_THREAD_POOL_NAME_FORMAT = "batch-delete-partitions-%d";
-  private static final ExecutorService BATCH_DELETE_PARTITIONS_THREAD_POOL = Executors.newFixedThreadPool(
-    BATCH_DELETE_PARTITIONS_THREADS_COUNT,
-    new ThreadFactoryBuilder()
-      .setNameFormat(BATCH_DELETE_PARTITIONS_THREAD_POOL_NAME_FORMAT)
-      .setDaemon(true).build()
-  );
 
   private Map<String, String> currentMetaVars;
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
+
+  protected ExecutorService getExecutorService() {
+    Class<? extends ExecutorServiceFactory> executorFactoryClass = this.conf
+        .getClass(CUSTOM_EXECUTOR_FACTORY_CONF,
+            DefaultExecutorServiceFactory.class).asSubclass(
+            ExecutorServiceFactory.class);
+    ExecutorServiceFactory factory = ReflectionUtils.newInstance(
+        executorFactoryClass, conf);
+    return factory.getExecutorService(conf);
+  }
 
   public AWSCatalogMetastoreClient(Configuration conf, HiveMetaHookLoader hook) throws MetaException {
     this.conf = conf;
@@ -178,6 +184,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
 
     // TODO preserve existing functionality for HiveMetaHook
     wh = new Warehouse(this.conf);
+    executorService = getExecutorService();
 
     AWSGlueMetastore glueMetastore = new AWSGlueMetastoreFactory().newMetastore(conf);
     glueMetastoreClientDelegate = new GlueMetastoreClientDelegate(this.conf, glueMetastore, wh);
@@ -921,7 +928,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
       int j = Math.min(i + BATCH_DELETE_PARTITIONS_PAGE_SIZE, numOfPartitionsToDelete);
       final List<Partition> partitionsOnePage = partitionsToDelete.subList(i, j);
 
-      batchDeletePartitionsFutures.add(BATCH_DELETE_PARTITIONS_THREAD_POOL.submit(new Callable<BatchDeletePartitionsHelper>() {
+      batchDeletePartitionsFutures.add(this.executorService.submit(new Callable<BatchDeletePartitionsHelper>() {
         @Override
         public BatchDeletePartitionsHelper call() throws Exception {
           return new BatchDeletePartitionsHelper(glueClient, dbName, tableName, catalogId, partitionsOnePage).deletePartitions();

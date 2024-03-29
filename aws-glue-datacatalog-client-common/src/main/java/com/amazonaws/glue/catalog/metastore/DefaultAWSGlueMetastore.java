@@ -57,7 +57,6 @@ import com.amazonaws.services.glue.model.UserDefinedFunction;
 import com.amazonaws.services.glue.model.UserDefinedFunctionInput;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.metastore.api.EnvironmentContext;
@@ -73,7 +72,6 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -110,14 +108,7 @@ public class DefaultAWSGlueMetastore implements AWSGlueMetastore {
      */
     public static final String SKIP_AWS_GLUE_ARCHIVE = "skipAWSGlueArchive";
 
-    private static final int NUM_EXECUTOR_THREADS = 5;
     static final String GLUE_METASTORE_DELEGATE_THREADPOOL_NAME_FORMAT = "glue-metastore-delegate-%d";
-    private static final ExecutorService GLUE_METASTORE_DELEGATE_THREAD_POOL = Executors.newFixedThreadPool(
-            NUM_EXECUTOR_THREADS,
-            new ThreadFactoryBuilder()
-                    .setNameFormat(GLUE_METASTORE_DELEGATE_THREADPOOL_NAME_FORMAT)
-                    .setDaemon(true).build()
-    );
 
     private final Configuration conf;
     private final AWSGlue glueClient;
@@ -508,7 +499,7 @@ public class DefaultAWSGlueMetastore implements AWSGlueMetastore {
                         .withTableName(tableName)
                         .withPartitionValues(partValues)
                         .withColumnNames(cols);
-                pagedResult.add(GLUE_METASTORE_DELEGATE_THREAD_POOL.submit(new Callable<GetColumnStatisticsForPartitionResult>() {
+                pagedResult.add(this.executorService.submit(new Callable<GetColumnStatisticsForPartitionResult>() {
                     @Override
                     public GetColumnStatisticsForPartitionResult call() throws Exception {
                         return glueClient.getColumnStatisticsForPartition(request);
@@ -543,7 +534,7 @@ public class DefaultAWSGlueMetastore implements AWSGlueMetastore {
                     .withDatabaseName(dbName)
                     .withTableName(tableName)
                     .withColumnNames(cols);
-            pagedResult.add(GLUE_METASTORE_DELEGATE_THREAD_POOL.submit(new Callable<GetColumnStatisticsForTableResult>() {
+            pagedResult.add(this.executorService.submit(new Callable<GetColumnStatisticsForTableResult>() {
                 @Override
                 public GetColumnStatisticsForTableResult call() throws Exception {
                     return glueClient.getColumnStatisticsForTable(request);
@@ -581,7 +572,7 @@ public class DefaultAWSGlueMetastore implements AWSGlueMetastore {
                     .withTableName(tableName)
                     .withPartitionValues(partitionValues)
                     .withColumnStatisticsList(statList);
-            pagedResult.add(GLUE_METASTORE_DELEGATE_THREAD_POOL.submit(new Callable<UpdateColumnStatisticsForPartitionResult>() {
+            pagedResult.add(this.executorService.submit(new Callable<UpdateColumnStatisticsForPartitionResult>() {
                 @Override
                 public UpdateColumnStatisticsForPartitionResult call() throws Exception {
                     return glueClient.updateColumnStatisticsForPartition(request);
@@ -617,7 +608,7 @@ public class DefaultAWSGlueMetastore implements AWSGlueMetastore {
                     .withDatabaseName(dbName)
                     .withTableName(tableName)
                     .withColumnStatisticsList(statList);
-            pagedResult.add(GLUE_METASTORE_DELEGATE_THREAD_POOL.submit(new Callable<UpdateColumnStatisticsForTableResult>() {
+            pagedResult.add(this.executorService.submit(new Callable<UpdateColumnStatisticsForTableResult>() {
                 @Override
                 public UpdateColumnStatisticsForTableResult call() throws Exception {
                     return glueClient.updateColumnStatisticsForTable(request);
