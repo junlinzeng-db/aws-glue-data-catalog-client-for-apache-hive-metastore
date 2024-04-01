@@ -112,7 +112,6 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   // TODO "hook" into Hive logging (hive or hive.metastore)
   private static final Logger logger = Logger.getLogger(AWSCatalogMetastoreClient.class);
 
-  private final ExecutorService executorService;
   private final HiveConf conf;
   private final AWSGlue glueClient;
   private final Warehouse wh;

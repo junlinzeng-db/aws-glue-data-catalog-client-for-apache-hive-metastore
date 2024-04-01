@@ -149,7 +149,6 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   // TODO "hook" into Hive logging (hive or hive.metastore)
   private static final Logger logger = Logger.getLogger(AWSCatalogMetastoreClient.class);
 
-  private final ExecutorService executorService;
   private final Configuration conf;
   private final AWSGlue glueClient;
   private final Warehouse wh;
@@ -165,15 +164,19 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
 
   private Map<String, String> currentMetaVars;
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
+  private static ExecutorService sharedExecutorService;
 
-  protected ExecutorService getExecutorService() {
-    Class<? extends ExecutorServiceFactory> executorFactoryClass = this.conf
-        .getClass(CUSTOM_EXECUTOR_FACTORY_CONF,
-            DefaultExecutorServiceFactory.class).asSubclass(
-            ExecutorServiceFactory.class);
-    ExecutorServiceFactory factory = ReflectionUtils.newInstance(
-        executorFactoryClass, conf);
-    return factory.getExecutorService(conf);
+  protected synchronized ExecutorService getExecutorService() {
+    if (sharedExecutorService == null) {
+      Class<? extends ExecutorServiceFactory> executorFactoryClass = this.conf
+          .getClass(CUSTOM_EXECUTOR_FACTORY_CONF,
+              DefaultExecutorServiceFactory.class).asSubclass(
+              ExecutorServiceFactory.class);
+      ExecutorServiceFactory factory = ReflectionUtils.newInstance(
+          executorFactoryClass, conf);
+      sharedExecutorService = factory.getExecutorService(conf);
+    }
+    return sharedExecutorService;
   }
 
   public AWSCatalogMetastoreClient(Configuration conf, HiveMetaHookLoader hook) throws MetaException {
@@ -184,7 +187,6 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
 
     // TODO preserve existing functionality for HiveMetaHook
     wh = new Warehouse(this.conf);
-    executorService = getExecutorService();
 
     AWSGlueMetastore glueMetastore = new AWSGlueMetastoreFactory().newMetastore(conf);
     glueMetastoreClientDelegate = new GlueMetastoreClientDelegate(this.conf, glueMetastore, wh);
@@ -928,7 +930,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
       int j = Math.min(i + BATCH_DELETE_PARTITIONS_PAGE_SIZE, numOfPartitionsToDelete);
       final List<Partition> partitionsOnePage = partitionsToDelete.subList(i, j);
 
-      batchDeletePartitionsFutures.add(this.executorService.submit(new Callable<BatchDeletePartitionsHelper>() {
+      batchDeletePartitionsFutures.add(getExecutorService().submit(new Callable<BatchDeletePartitionsHelper>() {
         @Override
         public BatchDeletePartitionsHelper call() throws Exception {
           return new BatchDeletePartitionsHelper(glueClient, dbName, tableName, catalogId, partitionsOnePage).deletePartitions();

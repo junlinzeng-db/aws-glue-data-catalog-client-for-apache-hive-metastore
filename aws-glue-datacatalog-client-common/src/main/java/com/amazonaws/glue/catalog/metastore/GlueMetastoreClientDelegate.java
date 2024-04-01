@@ -126,27 +126,28 @@ public class GlueMetastoreClientDelegate {
 
   public static final String CUSTOM_EXECUTOR_FACTORY_CONF = "hive.metastore.executorservice.factory.class";
 
-  static final String GLUE_METASTORE_DELEGATE_THREADPOOL_NAME_FORMAT = "glue-metastore-delegate-%d";
-
-  private final ExecutorService executorService;
   private final AWSGlueMetastore glueMetastore;
   private final Configuration conf;
   private final Warehouse wh;
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
   private final CatalogToHiveConverter catalogToHiveConverter;
   private final String catalogId;
+  private static ExecutorService sharedExecutorService;
 
   public static final String CATALOG_ID_CONF = "hive.metastore.glue.catalogid";
   public static final String NUM_PARTITION_SEGMENTS_CONF = "aws.glue.partition.num.segments";
 
-  protected ExecutorService getExecutorService() {
-    Class<? extends ExecutorServiceFactory> executorFactoryClass = this.conf
-            .getClass(CUSTOM_EXECUTOR_FACTORY_CONF,
-                    DefaultExecutorServiceFactory.class).asSubclass(
-                    ExecutorServiceFactory.class);
-    ExecutorServiceFactory factory = ReflectionUtils.newInstance(
-            executorFactoryClass, conf);
-    return factory.getExecutorService(conf);
+  protected synchronized ExecutorService getExecutorService() {
+    if (sharedExecutorService == null) {
+      Class<? extends ExecutorServiceFactory> executorFactoryClass = this.conf
+          .getClass(CUSTOM_EXECUTOR_FACTORY_CONF,
+              DefaultExecutorServiceFactory.class).asSubclass(
+              ExecutorServiceFactory.class);
+      ExecutorServiceFactory factory = ReflectionUtils.newInstance(
+          executorFactoryClass, conf);
+      sharedExecutorService = factory.getExecutorService(conf);
+    }
+    return sharedExecutorService;
   }
 
   public GlueMetastoreClientDelegate(Configuration conf, AWSGlueMetastore glueMetastore,
@@ -159,7 +160,6 @@ public class GlueMetastoreClientDelegate {
     this.conf = conf;
     this.glueMetastore = glueMetastore;
     this.wh = wh;
-    this.executorService = getExecutorService();
     // TODO - May be validate catalogId confirms to AWS AccountId too.
     catalogId = MetastoreClientUtils.getCatalogId(conf);
   }
@@ -671,7 +671,7 @@ public class GlueMetastoreClientDelegate {
       int j = Math.min(i + BATCH_CREATE_PARTITIONS_MAX_REQUEST_SIZE, catalogPartitions.size());
       final List<Partition> partitionsOnePage = catalogPartitions.subList(i, j);
 
-      batchCreatePartitionsFutures.add(this.executorService.submit(new Callable<BatchCreatePartitionsHelper>() {
+      batchCreatePartitionsFutures.add(getExecutorService().submit(new Callable<BatchCreatePartitionsHelper>() {
         @Override
         public BatchCreatePartitionsHelper call() throws Exception {
           return new BatchCreatePartitionsHelper(glueMetastore, dbName, tableName, catalogId, partitionsOnePage, ifNotExists)
@@ -871,7 +871,7 @@ public class GlueMetastoreClientDelegate {
           List<Column> newCols) throws TException {
     List<Pair<Partition, Future>> partitionFuturePairs = Collections.synchronizedList(Lists.newArrayList());
     partitions.parallelStream().forEach(partition -> partitionFuturePairs.add(Pair.of(partition,
-            (this.executorService.submit(
+            (getExecutorService().submit(
                     () -> alterPartitionColumns(databaseName, tableName, partition, newCols))))));
 
     List<List<String>> failedPartitionValues = new ArrayList<>();

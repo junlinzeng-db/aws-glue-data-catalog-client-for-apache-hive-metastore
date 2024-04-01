@@ -182,6 +182,7 @@ public class GlueMetastoreClientDelegateTest {
   public void testExecutorService() throws Exception {
     Object defaultExecutorService = new DefaultExecutorServiceFactory().getExecutorService(conf);
     assertEquals("Default executor service should be used", metastoreClientDelegate.getExecutorService(), defaultExecutorService);
+    assertEquals("Default executor service should be used", (new DefaultAWSGlueMetastore(conf, glueClient)).getExecutorService(), defaultExecutorService);
     HiveConf customConf = new HiveConf();
     customConf.set(GlueMetastoreClientDelegate.CATALOG_ID_CONF, CATALOG_ID);
     customConf.setClass(GlueMetastoreClientDelegate.CUSTOM_EXECUTOR_FACTORY_CONF, TestExecutorServiceFactory.class, ExecutorServiceFactory.class);
@@ -189,6 +190,7 @@ public class GlueMetastoreClientDelegateTest {
     Object customExecutorService = new TestExecutorServiceFactory().getExecutorService(customConf);
 
     assertEquals("Custom executor service should be used", customDelegate.getExecutorService(), customExecutorService);
+    assertEquals("Default executor service should be used", (new DefaultAWSGlueMetastore(customConf, glueClient)).getExecutorService(), customExecutorService);
   }
 
   // ===================== Database =====================
